@@ -63,6 +63,9 @@ public:
   void setMCShowerProducer(std::string s) { _mcshw_producer = s; }
   void setMCTrackProducer(std::string s) { _mctrk_producer = s; }
 
+  void setShowerEnergyResolution(float);
+  void setTrackEnergyResolution(float);
+
   // Set a numeric dataset ID, which is written into the tree as a tag
   void setDatasetID(int id) { _dataset_id = id; }
 
@@ -130,6 +133,10 @@ protected:
   size_t true_1m1p;
   size_t good_1m1p;
   size_t miss_1m1p;
+
+  // Optionally set some energy resolution
+  float _shower_energy_resolution;
+  float _track_energy_resolution;
 
   bool _verbose;  //!< Print verbose output
   int _dataset_id;  //!< An arbitrary numeric ID

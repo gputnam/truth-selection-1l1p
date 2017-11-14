@@ -26,6 +26,13 @@
 #include "TSSelection.h"
 
 namespace galleryfmwk {
+void TSSelection::setShowerEnergyResolution(float res) {
+  _shower_energy_resolution = res;
+}
+
+void TSSelection::setTrackEnergyResolution(float res) {
+  _track_energy_resolution = res;
+}
 
 bool TSSelection::is1l1p(std::vector<PIDParticle>& p, int lpdg) {
   // Are there exactly two particles ID'ed?
@@ -88,6 +95,10 @@ bool TSSelection::initialize() {
   true_1m1p = 0;
   good_1m1p = 0;
   miss_1m1p = 0;
+
+  // initialize resolutions to 0 (perfect resolution)
+  _shower_energy_resolution = 0.;
+  _track_energy_resolution = 0.;
 
   // Set up the output trees
   assert(_fout);
