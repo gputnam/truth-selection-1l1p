@@ -99,10 +99,20 @@ for v in wg.values():
 
 # POT scale factors for the Monte Carlo statistics (run utils/pot.py
 # to get the MC POT for the dataset.
-sfe = 5.0e19 / 8.47443e+21  # CCnue sample
-sfm = 5.0e19 / 2.81456e+19  # BNB inclusive (!CCnue) sample
 
-sfs = 5.0e19 / 1.86828e+21  # Signal sample
+"""
+sfm = 5.0e19 / 2.81456e+19  # BNB inclusive (!CCnue) sample
+if args.signal:
+   sfe = 5.0e19 / 1.86828e+21  # Signal sample
+else:
+   sfe = 5.0e19 / 8.47443e+21  # CCnue sample
+"""
+# UPDATED VALUES:
+sfm = 5.0e19 / 2.72261e+19  # BNB inclusive (!CCnue) sample
+if args.signal:
+   sfe = 5.0e19 / 1.668035e+21  # Signal sample
+else:
+   sfe = 5.0e19 / 7.86397e+21  # CCnue sample
 
 # Produce output file with covariances for each group
 for w, ws in wg.items():
