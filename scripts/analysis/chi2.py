@@ -307,7 +307,7 @@ def plot_spectra(emx, em, eex, ee, ess, fcov, pot=5e19, eff_m=0.3, eff_e=0.3):
     ax2.xaxis.set_major_locator(ticker.MultipleLocator(500))
     ax2.set_ylim(0, 1.1 * np.max(ee+es))
     ax2.legend(loc='upper right')
-    
+   
     plt.show()
 
 
@@ -429,25 +429,25 @@ if __name__ == '__main__':
     fcov = cov / np.einsum('i,j', eb, eb)
 
     # Plot significance vs. POT
-    do_sigma_pot_plot = False
+    do_sigma_pot_plot = True
     if do_sigma_pot_plot:
         #pots = np.linspace(5e19, 6.6e20, 3)
         pots = np.linspace(5e19, 6.8e20, 10)
-        p1 = plot_sigma_v_pot(enu_m, enu_e, enu_s, fcov, pots, mc=True)[0]
+        p1 = plot_sigma_v_pot(enu_m, enu_e, enu_s, fcov, pots, mc=False)[0]
         p1.set_label('Stat+Syst')
-        p2 = plot_sigma_v_pot(enu_m, enu_e, enu_s, fcov, pots, mc=True, syst=False)[0]
+        p2 = plot_sigma_v_pot(enu_m, enu_e, enu_s, fcov, pots, mc=False, syst=False)[0]
         p2.set_label('Stat Only')
         plt.legend(loc='best')
         plt.savefig('sigma_v_pot.pdf')
         plt.show()
 
     # Plot significance as a function of mu and e selection efficiencies
-    do_plot_sigma_v_eff = False
+    do_plot_sigma_v_eff = True
     if do_plot_sigma_v_eff:
         plot_sigma_v_eff(enu_m, enu_e, enu_s, fcov, pot=6.6e20)
 
     # Print interesting significances
-    if False:
+    if True:
         em = enu_m
         ee = enu_e
         es = enu_s
@@ -469,11 +469,11 @@ if __name__ == '__main__':
 
         print('6.6e20 stat mc: %f' %
                significance(em, ee, es, fcov,
-               pot=66e19, syst=False, mc=True, eff_m=0.3, eff_e=0.3))
+               pot=66e19, syst=False, mc=False, eff_m=0.3, eff_e=0.3))
 
         print('6.6e20 syst mc: %f' %
                significance(em, ee, es, fcov,
-               pot=66e19, syst=True, mc=True, eff_m=0.3, eff_e=0.3))
+               pot=66e19, syst=True, mc=False, eff_m=0.3, eff_e=0.3))
 
         #print('5.0e19 syst mc: %f' %
         #       significance(em, ee, es, fcov,
@@ -484,11 +484,11 @@ if __name__ == '__main__':
         #       pot=5e19, syst=False, mc=True, eff_m=0.3, eff_e=0.3))
 
     # Draw the total correlation matrix
-    draw_cor = False
+    draw_cor = True
     if draw_cor:
         plot_cor(cov)
 
-    do_constrain_nue = False
+    do_constrain_nue = True
     if do_constrain_nue:
         constrain_nue(enu_mx, enu_m, enu_ex, enu_e, enu_ss, fcov,
                       pot=6.6e20, eff_e=0.3)
@@ -497,7 +497,7 @@ if __name__ == '__main__':
                   pot=6.6e20, eff_e=0.3)
 
     # Draw the signal and background spectra
-    draw_spectra = False
+    draw_spectra = True
     if draw_spectra:
         #pot=1e21
         #e_eff = 0.3
@@ -527,7 +527,7 @@ if __name__ == '__main__':
         #plt.show()
 
     # Solo systematics
-    solo_systs = False
+    solo_systs = True
     if solo_systs:
         wnames = [
             'expskin_FluxUnisim',
