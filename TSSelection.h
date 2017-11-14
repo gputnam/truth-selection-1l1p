@@ -9,6 +9,7 @@
 
 #include <map>
 #include <string>
+#include <random>
 
 #include "nusimdata/SimulationBase/MCTruth.h"
 #include "lardataobj/MCBase/MCShower.h"
@@ -65,6 +66,8 @@ public:
 
   void setShowerEnergyResolution(float);
   void setTrackEnergyResolution(float);
+  float nextShowerEnergyDistortion();
+  float nextTrackEnergyDistortion();
 
   // Set a numeric dataset ID, which is written into the tree as a tag
   void setDatasetID(int id) { _dataset_id = id; }
@@ -73,18 +76,18 @@ public:
   static bool is1l1p(std::vector<PIDParticle>& p, int lpdg);
 
   // Apply track cuts
-  static inline bool goodTrack(const sim::MCTrack& t, const simb::MCTruth& truth) {
+  static inline bool goodTrack(const sim::MCTrack& t, const simb::MCTruth& truth, float energy_distortion=0.) {
     return (!t.empty() &&
             tsutil::isFromNuVertex(truth, t) &&
             t.Process() == "primary" &&
-            t.Start().E() - tsutil::get_pdg_mass(t.PdgCode()) >= 60);
+            t.Start().E() - tsutil::get_pdg_mass(t.PdgCode()) + energy_distortion >= 60);
   }
 
   // Apply shower cuts
-  static inline bool goodShower(const sim::MCShower& s, const simb::MCTruth& truth) {
+  static inline bool goodShower(const sim::MCShower& s, const simb::MCTruth& truth, float energy_distortion=0.) {
     return (tsutil::isFromNuVertex(truth, s) &&
             s.Process() == "primary" &&
-            s.Start().E() - tsutil::get_pdg_mass(s.PdgCode()) >= 30);
+            (s.Start().E() - tsutil::get_pdg_mass(s.PdgCode())) + energy_distortion >= 30);
   }
 
   // A structure used to hold TTree output
@@ -136,7 +139,13 @@ protected:
 
   // Optionally set some energy resolution
   float _shower_energy_resolution;
+  std::normal_distribution<float> _shower_energy_distribution;
   float _track_energy_resolution;
+  std::normal_distribution<float> _track_energy_distribution;
+  // random stuff
+  std::mt19937 _gen;
+
+
 
   bool _verbose;  //!< Print verbose output
   int _dataset_id;  //!< An arbitrary numeric ID

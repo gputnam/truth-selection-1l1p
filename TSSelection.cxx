@@ -5,6 +5,9 @@
 #include <string>
 #include <vector>
 
+// includes for random draws from gaussian
+#include <random>
+
 #include "canvas/Utilities/InputTag.h"
 #include "canvas/Persistency/Common/FindMany.h"
 #include "nusimdata/SimulationBase/MCTruth.h"
@@ -28,10 +31,24 @@
 namespace galleryfmwk {
 void TSSelection::setShowerEnergyResolution(float res) {
   _shower_energy_resolution = res;
+  _shower_energy_distribution = std::normal_distribution<float>(0., res);
 }
 
 void TSSelection::setTrackEnergyResolution(float res) {
   _track_energy_resolution = res;
+  _track_energy_distribution = std::normal_distribution<float>(0., res);
+}
+
+float TSSelection::nextTrackEnergyDistortion() {
+  if (_track_energy_resolution < 1e-4)
+    return 0.;
+  return _track_energy_distribution( _gen );
+}
+
+float TSSelection::nextShowerEnergyDistortion() {
+  if (_shower_energy_resolution < 1e-4)
+    return 0.;
+  return _shower_energy_distribution( _gen );
 }
 
 bool TSSelection::is1l1p(std::vector<PIDParticle>& p, int lpdg) {
@@ -99,6 +116,12 @@ bool TSSelection::initialize() {
   // initialize resolutions to 0 (perfect resolution)
   _shower_energy_resolution = 0.;
   _track_energy_resolution = 0.;
+  _shower_energy_distribution = std::normal_distribution<float>(0.0, 0.0);
+  _track_energy_distribution = std::normal_distribution<float>(0.0, 0.0);
+
+  // setting up random # stuff
+  std::random_device rd;
+  _gen = std::mt19937( rd() );;
 
   // Set up the output trees
   assert(_fout);
@@ -186,8 +209,10 @@ bool TSSelection::analyze(gallery::Event* ev) {
     for (size_t j=0; j<mctrack_list.size(); j++) {
       const sim::MCTrack& mct = mctrack_list.at(j);
 
+      float energy_distortion = nextTrackEnergyDistortion();
+
       // Apply track cuts
-      if (!goodTrack(mct, mctruth)) {
+      if (!goodTrack(mct, mctruth, energy_distortion)) {
         continue;
       }
 
@@ -199,6 +224,7 @@ bool TSSelection::analyze(gallery::Event* ev) {
         pos = mct[k].Position();
       }
 
+      // don't apply energy distortion to the "true" particle data
       particles_true.push_back({
         mct.PdgCode(),
         mct.PdgCode(),
@@ -242,7 +268,7 @@ bool TSSelection::analyze(gallery::Event* ev) {
         pdg_best,
         mct.PdgCode(),
         mct.Start().Momentum(),
-        mct.Start().E() - tsutil::get_pdg_mass(mct.PdgCode()),
+        mct.Start().E() - tsutil::get_pdg_mass(mct.PdgCode()) + energy_distortion,
         tsutil::eccqe(mct.Start().Momentum()),
         s,
         !tsutil::inFV(mct)
@@ -254,11 +280,14 @@ bool TSSelection::analyze(gallery::Event* ev) {
     for (size_t j=0; j<mcshower_list.size(); j++) {
       const sim::MCShower& mcs = mcshower_list.at(j);
 
+      float energy_distortion = nextShowerEnergyDistortion();
+
       // Apply shower cuts
-      if (!goodShower(mcs, mctruth)) {
+      if (!goodShower(mcs, mctruth, energy_distortion)) {
         continue;
       }
 
+      // don't apply energy distortion to the "true" particle data
       particles_true.push_back({
         mcs.PdgCode(),
         mcs.PdgCode(),
@@ -278,7 +307,10 @@ bool TSSelection::analyze(gallery::Event* ev) {
         pdg_best,
         mcs.PdgCode(),
         mcs.Start().Momentum(),
-        mcs.Start().E(),
+        // @ANDY: IS THIS A BUG???
+        // previous lines have this energy as:
+        // mcs.Start().E() - tsutil::get_pdg_mass(mcs.PdgCode())
+        mcs.Start().E() + energy_distortion,
         tsutil::eccqe(mcs.Start().Momentum()),
         -1,
         !tsutil::inFV(mcs)
