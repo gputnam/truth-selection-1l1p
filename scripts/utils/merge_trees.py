@@ -3,94 +3,124 @@ import os
 
 import ROOT
 
-def loop_merge(dir_name, data_dir, temp_dir, append, n_data, final_name):
+def loop_merge(source_dir, dir_name, temp_dir, n_selections, append, final_name):
     last_failed = False
     n_events = 0
-    data_tree_list = []
-    file_list = []
-    t_list = ROOT.TList()
+    data_tree_list_per_selection = [[] for i in range(n_selections)]
+    file_list_per_selection = [[] for i in range(n_selections)]
+    t_list_per_selection = [ROOT.TList() for i in range(n_selections)]
     merge_count = 0
 
+    fail_loop = False
+    finished_loop = True
     while 1:
-        fname = datadir + str(dir_name) + "/out.root"
-        if not os.path.isfile(fname):
-            if last_failed:
-                print "END OF DATA"
-                break
+        for i in range(n_selections):
+            fname = source_dir + str(dir_name) + "/out%i.root" % i
+            if not os.path.isfile(fname):
+                if last_failed:
+                    fail_loop = True
+                    finished_loop = False
+                    print "END OF DATA"
+                    break
+                else:
+                    finished_loop = False
+                    last_failed = True
+                    dir_name += 1
+                    break
             else:
-                last_failed = True
-                dir_name += 1
-                continue
-        else:
-            if last_failed:
-                print "MISSING DIRECTIORY %i " % (dir_name-1)
-            last_failed = False
+                if last_failed:
+                    print "MISSING DIRECTIORY %i " % (dir_name-1)
+                last_failed = False
 
-        file_list.append(ROOT.TFile(fname))
-        data_tree_list.append( file_list[-1].Get("data") )
-        try:
-            n_events += file_list[-1].Get("truth").GetEntries()
-        except:
-            print "CORRUPTED FILE: %s" % fname
-            dir_name += 1
-            continue
-        t_list.Add(data_tree_list[-1])
-        n_data += data_tree_list[-1].GetEntries()
+            file_list_per_selection[i].append(ROOT.TFile(fname))
+            # check if file is corrupted
+            try:
+                file_list_per_selection[i][-1].Get("truth").GetEntries()
+            except AttributeError:
+                print "CORRUPTED FILE: %s" % fname
+                if i != 0:
+                    raise
+                assert(i == 0)
+                file_list_per_selection[i].pop()
+                dir_name += 1
+                finished_loop = False
+                break
+
+            data_tree_list_per_selection[i].append( file_list_per_selection[i][-1].Get("data") )
+            t_list_per_selection[i].Add(data_tree_list_per_selection[i][-1])
+        if not finished_loop:
+            if fail_loop:
+                break 
+            else:
+                continue
 
         merge_count += 1
-        if (dir_name + 1) % 50 == 0:
-            print "Processed %i files" % (dir_name + 1)
-            print "N Events: %i" % n_events
-        if merge_count % 400 == 0:
+        max_n_merge = 400 / n_selections
+        if (dir_name + 1) % max((max_n_merge / 10),1) == 0:
+            print "Processed %i files" % ((dir_name + 1) * n_selections)
+        if merge_count % max(max_n_merge,1) == 0:
             break
         dir_name += 1
 
     if append:
-        last_file = ROOT.TFile(temp_dir + "temp" + final_name)
-        data_tree = last_file.Get("data")
-        last_n_events = last_file.Get("NEvents").GetUniqueID()
-        
-        t_list.Add(data_tree)
-        n_events += last_n_events
+        print "LOAD PREVIOUS AND MERGE AND WRITE" 
+        for i in range(n_selections):
+            temp_file_a = temp_dir + "temp%i" % i + final_name
+            last_file = ROOT.TFile(temp_file_a)
+            data_tree = last_file.Get("data")
+            t_list_per_selection[i].Add(data_tree)
 
-    merge_and_write(t_list, n_events, temp_dir + "temp2" + final_name)
-    if append:
-        last_file.Close()
-    [f.Close() for f in file_list]
-    os.rename(temp_dir + "temp2" + final_name, temp_dir + "temp" + final_name)
+            header = file_list_per_selection[i][-1].Get("header")
+
+            temp_file_b = temp_dir + "temp%iB" % i + final_name
+            merge_and_write(t_list_per_selection[i], header, temp_file_b)
+
+            last_file.Close()
+    else:
+        print "MERGE AND WRITE"
+        for i in range(n_selections):
+            header = file_list_per_selection[i][-1].Get("header")
+            temp_file_b = temp_dir + "temp%iB" % i + final_name
+            merge_and_write(t_list_per_selection[i], header, temp_file_b)
+
+    [[f.Close() for f in lst] for lst in file_list_per_selection]
+    for i in range(n_selections):
+        temp_file_a = temp_dir + "temp%i" % i + final_name
+        temp_file_b = temp_dir + "temp%iB" % i + final_name
+        os.rename(temp_file_b, temp_file_a)
+
     if last_failed:
-        return (0, False, n_data)
+        return (0, False)
     else: 
-        return (dir_name+1, True, n_data)
+        return (dir_name+1, True)
 
-def merge_and_write(t_list, n_events, f_out_name):
-    print "MERGING"
+def merge_and_write(t_list, header, f_out_name):
     f_out = ROOT.TFile(f_out_name, "RECREATE")
     f_out.cd()
     merged = ROOT.TTree.MergeTrees(t_list)
     merged.SetName("data")
 
-    print "WRITING TO FILE"
     merged.Write()
-    n_events_obj = ROOT.TNamed("NEvents", "NEvents")
-    n_events_obj.SetUniqueID(n_events)
-    n_events_obj.Write()
+    header.Write()
     f_out.Close()
 
-def main(datadir, out_file_name, temp_dir):
+def main(source_dir, output_dir, identifier, temp_dir, n_selections):
     append = False
     dir_name = 0
-    n_data = 0
-    final_name = out_file_name.split("/")[-1]
     while 1:
-        (dir_name, append, n_data) = loop_merge(dir_name, datadir, temp_dir, append, n_data, final_name)
+        (dir_name, append) = loop_merge(source_dir, dir_name, temp_dir, n_selections, append, identifier)
         if not append:
             break
-
-    os.rename(temp_dir + "temp" + final_name, out_file_name)
+    for i in range(n_selections):
+        os.rename(temp_dir + "temp%i" % i + final_name, output_dir + identifier + "%i.root" % i)
     print "N DATA: %i" % n_data
 
 if __name__=="__main__":
-    datadir = sys.argv[1]
-    main(datadir, sys.argv[2], sys.argv[3])
+    source_dir = sys.argv[1]
+    output_dir = sys.argv[2]
+    output_identifier = sys.argv[3]
+    temp_dir = sys.argv[4]
+    n_selections = int(sys.argv[5])
+   
+    main(source_dir, output_dir, output_identifier, temp_dir, n_selections) 
 
