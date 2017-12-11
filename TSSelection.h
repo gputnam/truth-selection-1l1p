@@ -93,6 +93,9 @@ public:
   bool pass_selection(std::vector<PIDParticle>& p, int lpdg); 
 
   // Apply track cuts
+  int trackPDG(float dEdx); // UNIMPLEMENTED
+  int trackPDG(TH2F* h_dedx, double s);
+
   static inline bool goodTrack(const sim::MCTrack& t, const simb::MCTruth& truth, float energy_distortion=0., float angle_distortion=0.) {
     return (!t.empty() &&
             tsutil::isFromNuVertex(truth, t) &&
@@ -105,6 +108,8 @@ public:
   }
 
   // Apply shower cuts
+  int showerPDG(float dEdx); 
+  int showerPDG(TH2F* h_dedx); // UNIMPLEMENTED
   static inline bool goodShower(const sim::MCShower& s, const simb::MCTruth& truth, float energy_distortion=0., float angle_distortion=0.) {
     return (tsutil::isFromNuVertex(truth, s) &&
             s.Process() == "primary" &&

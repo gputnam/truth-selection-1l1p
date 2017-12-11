@@ -54,6 +54,7 @@ void TSSelection::setTrackAngleResolution(float res, bool by_percent) {
 }
 
 void TSSelection::setTrackShowerConfusion(float percent) {
+  _track_shower_confusion = percent;
   _track_shower_confusion_distribution = std::bernoulli_distribution(percent);
 }
 
@@ -255,6 +256,43 @@ bool TSSelection::initialize(std::vector<std::string> input_files) {
   return true;
 }
 
+int TSSelection::trackPDG(TH2F* h_dedx, double s) {
+  double ks_best = 0;
+  int pdg_best = -999;
+  for (auto const& it : _trackdedxs) {
+    if (h_dedx->Integral() == 0 || it.second->Integral() == 0) { continue; }
+  
+    double ks = it.second->KolmogorovTest(h_dedx);
+    if (ks > ks_best) {
+      ks_best = ks;
+      pdg_best = it.first;
+    }
+  }
+  
+  // Un-PID "protons" that are too long or short
+  if (pdg_best == 2212 && (s > 80 || s < 12)) {
+    pdg_best = -888;
+  }
+  
+  // Call all remaining unmatched tracks protons
+  if (pdg_best == -999) {
+    pdg_best = 2212;
+  }
+
+  return pdg_best;
+}
+
+int TSSelection::trackPDG(float dEdx) {
+  int pdg_best = -999;
+  return pdg_best;
+}
+
+int TSSelection::showerPDG(float dEdx) {
+  return (dEdx < 3.5 ? 11 : 22);
+}
+int TSSelection::showerPDG(TH2F* h_dedx) {
+  return 0;
+}
 
 bool TSSelection::run() {
   bool ret = true;
@@ -315,20 +353,6 @@ bool TSSelection::analyze(gallery::Event* ev) {
       // Get vertex-associated contained tracks
       for (size_t j=0; j<mctrack_list.size(); j++) {
         const sim::MCTrack& mct = mctrack_list.at(j);
-      
-        float this_angle = mct.Start().Momentum().Theta();
-        float this_energy = mct.Start().E() - tsutil::get_pdg_mass(mct.PdgCode());
-        float energy_distortion = nextTrackEnergyDistortion( this_energy );
-        float angle_distortion = nextTrackAngleDistortion(this_angle);
-
-        bool isEmpty = mct.empty();
-        bool isFromNuVertex = tsutil::isFromNuVertex(mctruth, mct);
-        bool isPrimaryProces = mct.Process() == "primary";
-
-        // Apply track cuts for truth information
-        if (!goodTrack(mct, mctruth, energy_distortion, angle_distortion)) {
-          continue;
-        }
 
         // Track length
         double s = 0;
@@ -338,107 +362,149 @@ bool TSSelection::analyze(gallery::Event* ev) {
           pos = mct[k].Position();
         }
 
-        // don't apply energy distortion to the "true" particle data
-        particles_true.push_back({
-          mct.PdgCode(),
-          mct.PdgCode(),
-          mct.Start().Momentum(),
-          mct.Start().E() - tsutil::get_pdg_mass(mct.PdgCode()),
-          tsutil::eccqe(mct.Start().Momentum()),
-          s,
-          !tsutil::inFV(mct)
-        });
+        // Apply track cuts for truth information
+        if (goodTrack(mct, mctruth)) {
+          // don't apply energy distortion to the "true" particle data
+          particles_true.push_back({
+            mct.PdgCode(),
+            mct.PdgCode(),
+            mct.Start().Momentum(),
+            mct.Start().E() - tsutil::get_pdg_mass(mct.PdgCode()),
+            tsutil::eccqe(mct.Start().Momentum()),
+            s,
+            !tsutil::inFV(mct)
+          });
+        }
 
+        // set up variables for track/shower test
+        float this_angle = mct.Start().Momentum().Theta();
+        float this_energy = mct.Start().E() - tsutil::get_pdg_mass(mct.PdgCode());
+        float energy_distortion = nextTrackEnergyDistortion( this_energy );
+        float angle_distortion = nextTrackAngleDistortion(this_angle);
 
-        // now test whether 
-        ntracks++;
+        bool isEmpty = mct.empty();
+        bool isFromNuVertex = tsutil::isFromNuVertex(mctruth, mct);
+        bool isPrimaryProcess = mct.Process() == "primary";
 
-        // KS test on dE/dx vs. range to pick the best match for PID
-        TH2F* htemp = tsutil::HistDEdx(mct);
-        double ks_best = 0;
-        int pdg_best = -999;
+        bool exiting = !tsutil::inFV(mct);
+        float angle = this_angle + angle_distortion;
+        auto momentum = TLorentzVector(mct.Start().Momentum()); 
+        momentum.SetTheta(angle);
+        float eccqe = tsutil::eccqe(mct.Start().Momentum(), energy_distortion, angle_distortion);
+        float energy = this_energy + energy_distortion;
+        TH2F* h_dedx = tsutil::HistDEdx(mct);
+    
+        int true_pdgid = mct.PdgCode();
 
-        for (auto const& it : _trackdedxs) {
-          if (htemp->Integral() == 0 || it.second->Integral() == 0) { continue; }
-
-          double ks = it.second->KolmogorovTest(htemp);
-          if (ks > ks_best) {
-            ks_best = ks;
-            pdg_best = it.first;
+        // now do track/shower confusion
+        if (nextTrackShowerConfusion()) {
+          // shower
+          int pdg_best = showerPDG(h_dedx);
+          if (goodShower(isFromNuVertex, isPrimaryProcess, energy)) {
+            nshowers++;
+            particles_found.push_back({
+	      pdg_best,
+	      true_pdgid,
+	      TLorentzVector(momentum),
+	      energy,
+	      eccqe,
+	      -1, 
+	      exiting,
+	    });
           }
         }
-
-        delete htemp;
-
-        // Un-PID "protons" that are too long or short
-        if (pdg_best == 2212 && (s > 80 || s < 12)) {
-          pdg_best = -888;
+        else {
+          // track
+          int pdg_best = trackPDG(h_dedx, s);
+          if (goodTrack(isEmpty, isFromNuVertex, isPrimaryProcess, energy)) {
+            ntracks++;
+	    particles_found.push_back({
+	      pdg_best,
+	      true_pdgid,
+	      momentum,
+	      energy,
+	      eccqe,
+	      s,
+	      exiting,
+	    });
+          }
         }
-
-        // Call all remaining unmatched tracks protons
-        if (pdg_best == -999) {
-          pdg_best = 2212;
-        }
-
-        auto new_momentum = TLorentzVector(mct.Start().Momentum());
-        new_momentum.SetTheta(this_angle + angle_distortion);
-        particles_found.push_back({
-          pdg_best,
-          mct.PdgCode(),
-          new_momentum,
-          mct.Start().E() - tsutil::get_pdg_mass(mct.PdgCode()) + energy_distortion,
-          tsutil::eccqe(mct.Start().Momentum(), energy_distortion, angle_distortion),
-          s,
-          !tsutil::inFV(mct)
-        });
+        delete h_dedx;
       } 
-
 
       // Get vertex-associated contained showers
       for (size_t j=0; j<mcshower_list.size(); j++) {
         const sim::MCShower& mcs = mcshower_list.at(j);
 
+        // Apply shower cuts
+        if (goodShower(mcs, mctruth)) {
+          // don't apply energy distortion to the "true" particle data
+          particles_true.push_back({
+            mcs.PdgCode(),
+            mcs.PdgCode(),
+            mcs.Start().Momentum(),
+            mcs.Start().E() - tsutil::get_pdg_mass(mcs.PdgCode()),
+            tsutil::eccqe(mcs.Start().Momentum()),
+            -1,
+            !tsutil::inFV(mcs)
+          });
+        }
+
+        // HOW TO DO EMPTY(), LENGTH()????
+        // set up variables for track/shower test
         float this_energy = mcs.Start().E() - tsutil::get_pdg_mass(mcs.PdgCode());
         float energy_distortion = nextShowerEnergyDistortion( this_energy );
         float this_angle = mcs.Start().Momentum().Theta();
         float angle_distortion = nextTrackAngleDistortion(this_angle);
 
-        // Apply shower cuts
-        if (!goodShower(mcs, mctruth, energy_distortion)) {
-          continue;
+        //bool isEmpty = mcs.empty();
+        bool isEmpty = false;
+        bool isFromNuVertex = tsutil::isFromNuVertex(mctruth, mcs);
+        bool isPrimaryProcess = mcs.Process() == "primary";
+
+        bool exiting = !tsutil::inFV(mcs);
+        float angle = this_angle + angle_distortion;
+        auto momentum = TLorentzVector(mcs.Start().Momentum()); 
+        momentum.SetTheta(angle); 
+        float eccqe = tsutil::eccqe(mcs.Start().Momentum(), energy_distortion, angle_distortion);
+        float energy = this_energy + energy_distortion;
+        float dEdx = mcs.dEdx();
+
+        int true_pdgid = mcs.PdgCode();
+
+        // now do track/shower confusion
+        if (!nextTrackShowerConfusion()) {
+          // shower
+          int pdg_best = showerPDG(dEdx);
+          if (goodShower(isFromNuVertex, isPrimaryProcess, energy)) {
+            nshowers++;
+            particles_found.push_back({
+	      pdg_best,
+	      true_pdgid,
+	      TLorentzVector(momentum),
+	      energy,
+	      eccqe,
+	      -1, 
+	      exiting,
+	    });
+          }
         }
-
-        // don't apply energy distortion to the "true" particle data
-        particles_true.push_back({
-          mcs.PdgCode(),
-          mcs.PdgCode(),
-          mcs.Start().Momentum(),
-          mcs.Start().E() - tsutil::get_pdg_mass(mcs.PdgCode()),
-          tsutil::eccqe(mcs.Start().Momentum()),
-          -1,
-          !tsutil::inFV(mcs)
-        });
-
-        nshowers++;
-
-        // Guess the PDG based on shower dE/dx (cut at 3.5)
-        int pdg_best = (mcs.dEdx() < 3.5 ? 11 : 22);
-
-        TLorentzVector new_momentum(mcs.Start().Momentum());
-        new_momentum.SetTheta(this_angle + angle_distortion);
-        particles_found.push_back({
-          pdg_best,
-          mcs.PdgCode(),
-          new_momentum,
-          // @ANDY: IS THIS A BUG???
-          // previous lines have this energy as:
-          // mcs.Start().E() - tsutil::get_pdg_mass(mcs.PdgCode())
-          // note: fixed
-          mcs.Start().E() + energy_distortion - tsutil::get_pdg_mass(mcs.PdgCode()),
-          tsutil::eccqe(mcs.Start().Momentum(), energy_distortion, angle_distortion),
-          -1,
-          !tsutil::inFV(mcs)
-        });
+        else {
+          // track
+          int pdg_best = trackPDG(dEdx);
+          if (goodTrack(isEmpty, isFromNuVertex, isPrimaryProcess, energy)) {
+            ntracks++;
+	    particles_found.push_back({
+	      pdg_best,
+              true_pdgid,
+	      momentum,
+	      energy,
+	      eccqe,
+	      -1,
+	      exiting,
+	    });
+          }
+        }
       }
 
       // Classify the event (found/true 1lip/1m1p)
