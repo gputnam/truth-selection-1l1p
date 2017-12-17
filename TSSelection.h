@@ -120,11 +120,17 @@ public:
     return isFromNuVertex && isPrimaryProcess && energy >= 30;
   }
 
+  int get_nl(std::vector<PIDParticle>& p, int lpdg);
+  int get_ntrk(std::vector<PIDParticle>& p);
+  int get_np(std::vector<PIDParticle>& p);
+
   // A structure used to hold TTree output
   struct OutputData {
     OutputData() {
       weights = NULL;
     }
+    int np;
+    int n_trk;
     int nupdg;
     double enu;
     double q2;
@@ -175,6 +181,7 @@ public:
     int n_trials;
  
     // turn on/off different types of selections
+    bool accept_0p;
     bool accept_1p;
     bool accept_np;
     bool accept_ntrk;
@@ -228,6 +235,7 @@ protected:
 
   // turn on/off different types of selections
   bool _accept_1p;
+  bool _accept_0p;
   bool _accept_np;
   bool _accept_ntrk;
 

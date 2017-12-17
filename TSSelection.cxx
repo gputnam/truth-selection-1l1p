@@ -63,6 +63,8 @@ void TSSelection::setAcceptP(bool b, int n_protons) {
     _accept_1p = b;
   else if (n_protons > 1)
     _accept_np = b;
+  else if (n_protons == 0)
+    _accept_0p = b;
 }
 
 float TSSelection::nextTrackEnergyDistortion(float this_energy=0.) {
@@ -116,33 +118,52 @@ float TSSelection::nextShowerAngleDistortion(float this_angle=0.) {
   }
 }
 
-bool TSSelection::pass_selection(std::vector<PIDParticle>& p, int lpdg) {
-  // Count protons and the chosen lepton type
-  size_t np = 0;
-  size_t nl = 0;
-  size_t n_trk = 0;
+int TSSelection::get_np(std::vector<PIDParticle>& p) {
+  int np = 0;
   for (size_t i=0; i<p.size(); i++) {
     if (p[i].pdg == 2212) {
       np++;
-      n_trk ++;
     }
+  }
+  return np;
+}
+
+int TSSelection::get_ntrk(std::vector<PIDParticle>& p) {
+  int n_trk = 0;
+  for (size_t i=0; i<p.size(); i++) {
     // test for charged pions (the only other possible track?)
-    if (abs(p[i].pdg) == 211) {
+    if (p[i].pdg == 2212 || p[i].pdg == 211) {
       n_trk++;
     }
+  }
+  return n_trk;
+}
+
+int TSSelection::get_nl(std::vector<PIDParticle>& p, int lpdg) { 
+  int nl = 0;
+  for (size_t i=0; i<p.size(); i++) {
     if (p[i].pdg == lpdg) {
       nl++;
     }
   }
+  return nl;
+}
 
+bool TSSelection::pass_selection(std::vector<PIDParticle>& p, int lpdg) {
+  // Count protons and the chosen lepton type
+  size_t np = (size_t)get_np(p);
+  size_t nl = (size_t)get_nl(p, lpdg);
+  size_t n_trk = (size_t)get_ntrk(p);
 
   bool pass_1l1p = nl == 1 && np == 1 && nl + np == p.size();
-  bool pass_1lnp = nl == 1 && nl + np == p.size();
-  bool pass_1lntrk = nl == 1 && nl + n_trk == p.size();
+  bool pass_1lnp = nl == 1 && np > 1 && nl + np == p.size();
+  bool pass_1lntrk = nl == 1 && n_trk >= 1 && nl + n_trk == p.size();
+  bool pass_1l0p = nl == 1 && np == 0 && nl + np == p.size();
 
   return (pass_1l1p && _accept_1p) 
       || (pass_1lnp && _accept_np) 
-      || (pass_1lntrk && _accept_ntrk);
+      || (pass_1lntrk && _accept_ntrk)
+      || (pass_1l0p && _accept_0p);
 }
 
 
@@ -212,6 +233,7 @@ bool TSSelection::initialize(std::vector<std::string> input_files) {
   _accept_1p = true;
   _accept_ntrk = false;
   _accept_np = false;
+  _accept_0p = false;
 
   // setting up random # stuff
   std::random_device rd;
@@ -224,6 +246,8 @@ bool TSSelection::initialize(std::vector<std::string> input_files) {
 
   _data = new OutputData;
   _tree = new TTree("data", "");
+  _tree->Branch("np", &_data->np);
+  _tree->Branch("n_trk", &_data->n_trk);
   _tree->Branch("nupdg", &_data->nupdg);
   _tree->Branch("enu", &_data->enu);
   _tree->Branch("q2", &_data->q2);
@@ -455,7 +479,7 @@ bool TSSelection::analyze(gallery::Event* ev) {
         float this_energy = mcs.Start().E() - tsutil::get_pdg_mass(mcs.PdgCode());
         float energy_distortion = nextShowerEnergyDistortion( this_energy );
         float this_angle = mcs.Start().Momentum().Theta();
-        float angle_distortion = nextTrackAngleDistortion(this_angle);
+        float angle_distortion = nextShowerAngleDistortion(this_angle);
 
         //bool isEmpty = mcs.empty();
         bool isEmpty = false;
@@ -587,6 +611,8 @@ bool TSSelection::analyze(gallery::Event* ev) {
           wgh = eventweights_list[0].fWeight;
         }
 
+        _data->np = get_np(particles_found);
+        _data->n_trk = get_ntrk(particles_found);
 	_data->nupdg = nu.Nu().PdgCode();
 	_data->enu = nu.Nu().E();
 	_data->q2 = nu.QSqr();
@@ -709,6 +735,8 @@ bool TSSelection::finalize() {
             << std::endl;
 
   std::cout << "SHOWER, TRACK ENERGY RESOLUTION: " << _shower_energy_resolution << " "<< _track_energy_resolution << std::endl;
+ std::cout << "ACCEPT NP " << _accept_np << std::endl;
+ std::cout << "ACCEPT NTRK " << _accept_ntrk << std::endl;
 
   // record header data
   _fout->cd();
@@ -736,9 +764,26 @@ bool TSSelection::finalize() {
   header_tree->Branch("n_trials", &to_header->n_trials);
   
   header_tree->Branch("accept_1p", &to_header->accept_1p);
+  header_tree->Branch("accept_0p", &to_header->accept_0p);
   header_tree->Branch("accept_np", &to_header->accept_np);
   header_tree->Branch("accept_ntrk", &to_header->accept_ntrk);
   header_tree->Branch("input_files", &to_header->input_files);
+
+  unsigned n_good_1e1p = static_cast<unsigned>(good_1e1p);
+  unsigned n_true_1e1p = static_cast<unsigned>(true_1e1p);
+  unsigned n_miss_1e1p = static_cast<unsigned>(miss_1e1p);
+ 
+  unsigned n_good_1m1p = static_cast<unsigned>(good_1m1p);
+  unsigned n_true_1m1p = static_cast<unsigned>(true_1m1p);
+  unsigned n_miss_1m1p = static_cast<unsigned>(miss_1m1p);
+
+  header_tree->Branch("good_1e1p", &n_good_1e1p);
+  header_tree->Branch("miss_1e1p", &n_miss_1e1p);
+  header_tree->Branch("true_1e1p", &n_true_1e1p);
+
+  header_tree->Branch("good_1m1p", &n_good_1m1p);
+  header_tree->Branch("miss_1m1p", &n_miss_1m1p);
+  header_tree->Branch("true_1m1p", &n_true_1m1p);
 
   header.track_producer = _track_producer;
   header.fw_producer = _fw_producer;
@@ -761,6 +806,7 @@ bool TSSelection::finalize() {
   header.n_trials = _n_trials;
 
   header.accept_1p = _accept_1p;
+  header.accept_0p = _accept_0p;
   header.accept_np = _accept_np;
   header.accept_ntrk = _accept_ntrk;
 
