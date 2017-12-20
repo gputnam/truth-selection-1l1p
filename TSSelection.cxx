@@ -4,6 +4,7 @@
 #include <sstream>
 #include <string>
 #include <vector>
+#include <mutex>
 
 // includes for random draws from gaussian
 #include <random>
@@ -166,34 +167,40 @@ bool TSSelection::pass_selection(std::vector<PIDParticle>& p, int lpdg) {
 }
 
 
-bool TSSelection::initialize(std::vector<std::string> input_files) {
+bool TSSelection::initialize(std::vector<std::string> input_files, std::mutex *writer_lock) {
   // Load track dE/dx distributions from file
-  _pdf_file = TFile::Open("./dedx_pdfs.root");
-  assert(_pdf_file->IsOpen());
+  if (writer_lock != NULL) writer_lock->lock();
+  {
+    _pdf_file = TFile::Open("./dedx_pdfs.root");
+    assert(_pdf_file->IsOpen());
 
-  TIter next(_pdf_file->GetListOfKeys());
-  TKey* key;
-  while ((key = (TKey*)next())) {
-    const char* name = key->GetName();
-    TObjArray* tokens = TString(name).Tokenize("_");
-    TString htype = ((TObjString*)tokens->At(0))->GetString();
-    int pdg = atoi(((TObjString*)tokens->At(1))->GetString());
+    TIter next(_pdf_file->GetListOfKeys());
+    TKey* key;
+    while ((key = (TKey*)next())) {
+      const char* name = key->GetName();
+      TObjArray* tokens = TString(name).Tokenize("_");
+      TString htype = ((TObjString*)tokens->At(0))->GetString();
+      int pdg = atoi(((TObjString*)tokens->At(1))->GetString());
 
-    if (htype.Contains("htrackdedx")) {
-      TH2F* h = (TH2F*) _pdf_file->Get(name);
-      if (h->Integral() == 0 || pdg < 0 || pdg > 10000) { continue; }
+      if (htype.Contains("htrackdedx")) {
+        TH2F* h = (TH2F*) _pdf_file->Get(name);
+        if (h->Integral() == 0 || pdg < 0 || pdg > 10000) { continue; }
 
-      // Ignore a few low bins
-      for (int i=0; i<h->GetNbinsX(); i++) {
-        for (int j=0; j<h->GetNbinsY(); j++) {
-          if (i < 2 || j < 2) {
-            h->SetBinContent(i, j, 0);
+        // Ignore a few low bins
+        for (int i=0; i<h->GetNbinsX(); i++) {
+          for (int j=0; j<h->GetNbinsY(); j++) {
+            if (i < 2 || j < 2) {
+              h->SetBinContent(i, j, 0);
+            }
           }
         }
+        _trackdedxs[pdg] = h;
       }
-      _trackdedxs[pdg] = h;
     }
   }
+  std::cout << "END OF SCOPE" << std::endl;
+  if (writer_lock != NULL) writer_lock->unlock();
+  std::cout << "UNLOCKED" << std::endl;
   // initialize input files
   _input_files = input_files;
 
@@ -239,6 +246,7 @@ bool TSSelection::initialize(std::vector<std::string> input_files) {
   _gen = std::mt19937( rd() );;
 
   // Set up the output trees
+  std::cout << "ASSERTING FILE" << std::endl;
   assert(_fout);
   assert(_fout->IsOpen());
   _fout->cd();
@@ -257,8 +265,8 @@ bool TSSelection::initialize(std::vector<std::string> input_files) {
   _tree->Branch("mode", &_data->int_mode);
   _tree->Branch("ccnc", &_data->ccnc);
   _tree->Branch("eccqe", &_data->eccqe);
-  _tree->Branch("eps", &_data->eps);
-  _tree->Branch("ppdgs", &_data->ppdgs);
+  //_tree->Branch("eps", &_data->eps);
+  //_tree->Branch("ppdgs", &_data->ppdgs);
   _tree->Branch("elep", &_data->elep);
   _tree->Branch("thetalep", &_data->thetalep);
   _tree->Branch("philep", &_data->philep);
@@ -266,15 +274,21 @@ bool TSSelection::initialize(std::vector<std::string> input_files) {
   _tree->Branch("lpid", &_data->lpid);
   _tree->Branch("llen", &_data->llen);
   _tree->Branch("lexit", &_data->lexit);
-  _tree->Branch("bnbweight", &_data->bnbweight);
-  _tree->Branch("dataset", &_data->dataset);
-  _tree->Branch("weights", &_data->weights);
+  //_tree->Branch("bnbweight", &_data->bnbweight);
+  //_tree->Branch("dataset", &_data->dataset);
+  //_tree->Branch("weights", &_data->weights);
 
   _truthtree = new TNtuple("truth", "", "nupdg:enu:ccnc:int:mode:w:q2:lpdg:elep:tlep:npip:npim:npi0:np:nn:fw:ttrk:rtrk:texit:tshr:rshr:sexit");
   _mectree = new TNtuple("mec", "", "nupdg:enu:ccnc:mode:w:q2:lpdg:tlep:ep0:ep1:ep2:ep3:ep4");
 
+  std::cout << "MADE TREES" << std::endl;
   _record_truth = true;
   _record_mec = true;
+  _writer_lock = writer_lock;
+
+  if (writer_lock != NULL) writer_lock->lock();
+    std::cout << "END OF FUNCTION " << _writer_lock << std::endl;
+  if (writer_lock != NULL) writer_lock->unlock();
 
   return true;
 }
@@ -499,6 +513,8 @@ bool TSSelection::analyze(gallery::Event* ev) {
       
       // Print out PID information mis-IDs
       if ((f_1e1p && !t_1e1p) || (f_1m1p && !t_1m1p)) {
+        if (_writer_lock != NULL) _writer_lock->lock();
+
         std::cout << "true: " << mctruth.GetNeutrino().Nu().E() * 1000
                   << "[" << mctruth.GetNeutrino().InteractionType() << "] ";
         for (size_t k=0; k<particles_true.size(); k++) {
@@ -511,6 +527,7 @@ bool TSSelection::analyze(gallery::Event* ev) {
           std::cout << particles_found[k] << " ";
         }
         std::cout << std::endl;
+        if (_writer_lock != NULL) _writer_lock->unlock();
       }
       // Write event to output tree for found 1l1p events
       if (f_1e1p || f_1m1p) {
@@ -643,6 +660,7 @@ bool TSSelection::analyze(gallery::Event* ev) {
 
 bool TSSelection::finalize() {
   // Print out statistics
+  if (_writer_lock != NULL) _writer_lock->lock();
   std::cout << "1e1p true: " << true_1e1p
             << ", good: " << good_1e1p
             << ", miss: " << miss_1e1p
@@ -671,6 +689,7 @@ bool TSSelection::finalize() {
   std::cout << "SHOWER, TRACK ENERGY RESOLUTION: " << _shower_energy_resolution << " "<< _track_energy_resolution << std::endl;
  std::cout << "ACCEPT NP " << _accept_np << std::endl;
  std::cout << "ACCEPT NTRK " << _accept_ntrk << std::endl;
+  if (_writer_lock != NULL) _writer_lock->unlock();
 
   // record header data
   _fout->cd();

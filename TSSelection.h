@@ -10,6 +10,7 @@
 #include <map>
 #include <string>
 #include <random>
+#include <mutex>
 
 #include "nusimdata/SimulationBase/MCTruth.h"
 #include "lardataobj/MCBase/MCShower.h"
@@ -48,7 +49,7 @@ public:
 
   TSSelection(): _verbose(false) {}
 
-  bool initialize(std::vector<std::string> input_files);
+  bool initialize(std::vector<std::string> input_files, std::mutex *writer_lock=NULL);
 
   bool run();
 
@@ -88,6 +89,8 @@ public:
 
   // Set a numeric dataset ID, which is written into the tree as a tag
   void setDatasetID(int id) { _dataset_id = id; }
+  
+  void setWriterLock(std::mutex *m) {_writer_lock = m;}
 
   // Utility function to test if a list of particles is 1lip
   bool pass_selection(std::vector<PIDParticle>& p, int lpdg); 
@@ -253,6 +256,10 @@ protected:
 
   TFile* _pdf_file;  //!< File containing dE/dx PDFs
   std::map<int, TH2F*> _trackdedxs;  // Track dE/dx distributions
+
+  // optional writer lock
+  std::mutex *_writer_lock;
+
 };
 
 }  // namespace galleryfmwk

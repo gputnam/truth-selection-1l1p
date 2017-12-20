@@ -24,6 +24,7 @@ parser.add_argument("-o", "--output-path", dest="outputpath",
 parser.add_argument("-d", "--debug",action='store_true',
                     help="Will not delete submission files in the end. Useful for debugging and will only print the submission command on screen.")
 parser.add_argument("-n", "--n_files_per_run", type=int, default=1)
+parser.add_argument("-w", "--n_threads", type=int, default=1)
 parser.add_argument("-T", "--n_trials",type=int, default=1)
 parser.add_argument("-r", "--run_no", type=int, default=0)
 
@@ -64,8 +65,9 @@ outtar.close()
 
 truth_selection_args = ""
 truth_selection_args = "-o "
-for d in range(n_selections):
-   truth_selection_args += "out%i.root " % d
+for i in range(args.n_threads):
+    for d in range(n_selections):
+        truth_selection_args += "%i/out%i.root " % (i, d)
 truth_selection_args += " -n %i " % n_selections
 if track_energy_distortion is not None:
     truth_selection_args += " --T_energy_distortion "
@@ -135,6 +137,11 @@ do
 done
 ifdh cp -f filelist
 
+for i in {0..%(max_thread)s}
+do
+  mkdir $i
+done
+
 echo "What's in here? " >>${_RUN_NUMBER}.out 2>&1
 ls >>${_RUN_NUMBER}.out 2>&1
 
@@ -144,18 +151,22 @@ echo "With Input Files: ${FILELIST}" >>${_RUN_NUMBER}.out 2>&1
 
 ./truth_selection $FILELIST %(args)s >>${_RUN_NUMBER}.out 2>&1
 
-mkdir ${_RUN_NUMBER}
+mv ${_RUN_NUMBER}.out 0/.
+mkdir data
+export MIN_DIR_NO=$(($_RUN_NUMBER*%(max_thread)s+$_RUN_NUMBER))
+if [ "$PROCESS" != "0" ]
+then
+  for i in {0..%(max_thread)s} 
+  do
+    mv $i data/$((i+MIN_DIR_NO))
+  done
+fi
 
-cp ${_RUN_NUMBER}.out ${_RUN_NUMBER}/.
-for i in {0..%(max_i_selection)s} 
-do
-  cp out${i}.root ${_RUN_NUMBER}/.
-done
+echo "Copying output" >>${_RUN_NUMBER}.out 2>&1
 
-ifdh mkdir %(outputdir)s/${_RUN_NUMBER}
-ifdh cp -r ${_RUN_NUMBER} %(outputdir)s/${_RUN_NUMBER}/
+ifdh cp -r data/* %(outputdir)s/
 
-'''%{'firstrun':args.run_no,'min_file_no':args.firstfile,'outputdir':args.outputpath, 'args': truth_selection_args, 'f_list_name': args.f_list_name,'max_i_selection':n_selections-1,'files_per_job':args.n_files_per_run}
+'''%{'firstrun':args.run_no,'min_file_no':args.firstfile,'outputdir':args.outputpath, 'args': truth_selection_args, 'f_list_name': args.f_list_name, 'max_thread':args.n_threads-1,'files_per_job':args.n_files_per_run}
 
 runjobfname="runjob_%i.sh"%os.getpid()
 of=open(runjobfname,'w')
@@ -167,7 +178,7 @@ n_jobs = n_files / args.n_files_per_run
 if n_files % args.n_files_per_run != 0:
     n_jobs += 1
 
-cmd="jobsub_submit --memory=1000MB --disk=10GB --group=uboone -N %i --tar_file_name=dropbox://%s file://%s"%(n_jobs,os.path.abspath(tarfilename),os.path.abspath(runjobfname))
+cmd="jobsub_submit --memory=%iMB --disk=%iGB --group=uboone -N %i --tar_file_name=dropbox://%s file://%s"%(args.n_files_per_run*40+args.n_threads*10,args.n_files_per_run*4+args.n_threads*1,n_jobs,os.path.abspath(tarfilename),os.path.abspath(runjobfname))
 
 if (not args.debug):
     print "Running submit cmd:"
