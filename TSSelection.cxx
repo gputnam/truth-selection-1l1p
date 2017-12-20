@@ -314,8 +314,9 @@ int TSSelection::trackPDG(float dEdx) {
 int TSSelection::showerPDG(float dEdx) {
   return (dEdx < 3.5 ? 11 : 22);
 }
+// all mis-identified showers are electrons (for now)
 int TSSelection::showerPDG(TH2F* h_dedx) {
-  return 0;
+  return 11;
 }
 
 bool TSSelection::run() {

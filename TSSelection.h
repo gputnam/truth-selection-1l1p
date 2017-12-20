@@ -109,7 +109,7 @@ public:
 
   // Apply shower cuts
   int showerPDG(float dEdx); 
-  int showerPDG(TH2F* h_dedx); // UNIMPLEMENTED
+  int showerPDG(TH2F* h_dedx);
   static inline bool goodShower(const sim::MCShower& s, const simb::MCTruth& truth, float energy_distortion=0., float angle_distortion=0.) {
     return (tsutil::isFromNuVertex(truth, s) &&
             s.Process() == "primary" &&
